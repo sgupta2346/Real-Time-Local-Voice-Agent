@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Local Voice Agent — demo</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --bubble-user:    #eef1f6;
+    --bubble-agent:   #eef9f4;
+    --series-stt:     #2a78d6; /* blue */
+    --series-llm:     #eb6834; /* orange */
+    --series-tts:     #1baf7a; /* aqua */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --bubble-user:    #1e2a38;
+      --bubble-agent:   #16241f;
+      --series-stt:     #3987e5;
+      --series-llm:     #d95926;
+      --series-tts:     #199e70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --bubble-user:    #1e2a38;
+    --bubble-agent:   #16241f;
+    --series-stt:     #3987e5;
+    --series-llm:     #d95926;
+    --series-tts:     #199e70;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+  main { width: 100%; max-width: 720px; }
+
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 24px; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    text-transform: uppercase; color: var(--series-tts); border: 1px solid var(--series-tts);
+    border-radius: 999px; padding: 2px 8px; margin-bottom: 12px;
+  }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .picker button {
+    font-family: inherit; font-size: 13px; padding: 8px 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--page); color: var(--text-primary);
+    cursor: pointer;
+  }
+  .picker button[aria-pressed="true"] { border-color: var(--series-stt); color: var(--series-stt); }
+
+  .run-btn {
+    font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 20px;
+    border-radius: 8px; border: none; background: var(--series-stt); color: white; cursor: pointer;
+  }
+  .run-btn:disabled { opacity: .5; cursor: default; }
+
+  .bubble-row { display: flex; margin: 14px 0; }
+  .bubble-row.agent { justify-content: flex-end; }
+  .bubble {
+    max-width: 80%; padding: 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.4;
+  }
+  .bubble .who { font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+    color: var(--text-muted); margin-bottom: 4px; }
+  .bubble-row.user .bubble { background: var(--bubble-user); }
+  .bubble-row.agent .bubble { background: var(--bubble-agent); }
+  .bubble audio { width: 100%; margin-top: 8px; height: 32px; }
+
+  .timeline-title { font-size: 13px; color: var(--text-secondary); margin: 0 0 10px; }
+  .timeline-bar {
+    display: flex; height: 24px; border-radius: 4px; overflow: hidden; background: var(--gridline);
+  }
+  .timeline-seg {
+    height: 100%; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; color: white; white-space: nowrap; overflow: hidden;
+    border-right: 2px solid var(--surface-1);
+  }
+  .timeline-seg:last-child { border-right: none; }
+  .timeline-seg.stt { background: var(--series-stt); }
+  .timeline-seg.llm { background: var(--series-llm); }
+  .timeline-seg.tts { background: var(--series-tts); }
+
+  .legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
+  .legend .key { display: flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .legend .dot.stt { background: var(--series-stt); }
+  .legend .dot.llm { background: var(--series-llm); }
+  .legend .dot.tts { background: var(--series-tts); }
+
+  .hero { font-size: 40px; font-weight: 600; margin: 4px 0 0; }
+  .hero-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+
+  .empty { color: var(--text-muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="badge">100% local &middot; no cloud APIs</div>
+  <h1>Local Voice Agent</h1>
+  <p class="subtitle">faster-whisper &rarr; Qwen3 (Ollama) &rarr; Kokoro TTS, running entirely on-device.</p>
+
+  <div class="card">
+    <div class="timeline-title">Pick a sample question (synthetic voice, not a live mic)</div>
+    <div class="picker" id="picker"></div>
+    <button class="run-btn" id="runBtn" disabled>Run pipeline</button>
+  </div>
+
+  <div class="card" id="conversation">
+    <p class="empty">Pick a sample above and run the pipeline to see the conversation appear here.</p>
+  </div>
+
+  <div class="card" id="timelineCard" style="display:none;">
+    <div class="hero-label">Total pipeline latency</div>
+    <p class="hero" id="heroTotal">&mdash;</p>
+    <div class="timeline-title" style="margin-top:16px;">Stage breakdown</div>
+    <div class="timeline-bar" id="timelineBar"></div>
+    <div class="legend">
+      <div class="key"><span class="dot stt"></span>Speech-to-text</div>
+      <div class="key"><span class="dot llm"></span>LLM reasoning</div>
+      <div class="key"><span class="dot tts"></span>Text-to-speech</div>
+    </div>
+  </div>
+</main>
+
+<script>
+let selectedSample = null;
+
+async function loadSamples() {
+  const res = await fetch('/api/samples');
+  const samples = await res.json();
+  const picker = document.getElementById('picker');
+  picker.innerHTML = '';
+  samples.forEach((s, i) => {
+    const btn = document.createElement('button');
+    btn.textContent = s.label;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.onclick = () => selectSample(s, btn);
+    picker.appendChild(btn);
+    if (i === 0) selectSample(s, btn);
+  });
+}
+
+function selectSample(sample, btn) {
+  document.querySelectorAll('#picker button').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  btn.setAttribute('aria-pressed', 'true');
+  selectedSample = sample;
+  document.getElementById('runBtn').disabled = false;
+}
+
+function fmt(s) { return s.toFixed(2) + 's'; }
+
+async function runPipeline() {
+  const runBtn = document.getElementById('runBtn');
+  runBtn.disabled = true;
+  runBtn.textContent = 'Running...';
+
+  const res = await fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: selectedSample.filename })
+  });
+  const data = await res.json();
+
+  const conv = document.getElementById('conversation');
+  conv.innerHTML = `
+    <div class="bubble-row user">
+      <div class="bubble">
+        <div class="who">You (synthetic voice)</div>
+        ${data.transcript}
+        <audio controls src="${data.input_audio_url}"></audio>
+      </div>
+    </div>
+    <div class="bubble-row agent">
+      <div class="bubble">
+        <div class="who">Agent</div>
+        ${data.reply_text || '(no reply)'}
+        ${data.reply_audio_url ? `<audio controls src="${data.reply_audio_url}"></audio>` : ''}
+      </div>
+    </div>
+  `;
+
+  const t = data.timings;
+  const total = t.stt + t.llm + t.tts;
+  document.getElementById('heroTotal').textContent = fmt(total);
+
+  const bar = document.getElementById('timelineBar');
+  bar.innerHTML = '';
+  [['stt', t.stt], ['llm', t.llm], ['tts', t.tts]].forEach(([cls, dur]) => {
+    const seg = document.createElement('div');
+    seg.className = 'timeline-seg ' + cls;
+    const pct = (dur / total) * 100;
+    seg.style.width = pct + '%';
+    seg.title = cls.toUpperCase() + ': ' + fmt(dur);
+    if (pct > 12) seg.textContent = fmt(dur);
+    bar.appendChild(seg);
+  });
+  document.getElementById('timelineCard').style.display = 'block';
+
+  runBtn.disabled = false;
+  runBtn.textContent = 'Run pipeline';
+}
+
+document.getElementById('runBtn').addEventListener('click', runPipeline);
+loadSamples();
+</script>
+</body>
+</html>

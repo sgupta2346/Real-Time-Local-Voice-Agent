@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+models/
+*.wav
+!samples/*.wav
+*.egg-info/
+.env
+benchmarks/*.jsonl
+.pytest_cache/
