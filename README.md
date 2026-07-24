@@ -71,6 +71,15 @@ second answer comes back close to instantly, raw generation is usually well
 under half a second. Most of the slowness above is stages waiting on each
 other, not any one model being slow on its own.
 
+*(Numbers above are on a quiet system; STT/TTS are CPU-bound so background load affects them.)*
+
+## Demo
+
+![Demo screenshot](docs/demo-screenshot.png)
+
+A synthetic sample question goes in, gets transcribed, answered by the local
+LLM, and spoken back, with the stage timing breakdown shown live.
+
 ## Roadmap
 
 The pipeline above is the foundation. The part that actually makes a voice

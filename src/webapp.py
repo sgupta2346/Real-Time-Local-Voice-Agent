@@ -1,4 +1,5 @@
 import time
+import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, abort
@@ -64,7 +65,7 @@ def run_pipeline():
     reply_text = llm.reply(transcript) if transcript else ""
     t3 = time.time()
 
-    reply_filename = f"reply_{filename}"
+    reply_filename = f"reply_{uuid.uuid4().hex[:8]}_{filename}"
     if reply_text:
         out_audio, sr = tts.synthesize(reply_text)
         audio_io.save_wav(str(GENERATED_DIR / reply_filename), out_audio, sr)
@@ -87,4 +88,4 @@ def run_pipeline():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False, threaded=False)
