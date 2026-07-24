@@ -16,16 +16,20 @@ looks like.
 
 ## What's here right now
 
-This is the baseline pipeline: record audio, transcribe, ask the LLM,
-synthesize speech, play it back. Each stage runs to completion before the
-next one starts. It's not fast, and it isn't meant to be yet. This is the
-plumbing and model-selection layer, not the latency-optimized version. That
-part's next, see Roadmap.
+There are two pipelines in this repo, on purpose. `main.py` is the baseline:
+record audio, transcribe, ask the LLM, synthesize speech, play it back, each
+stage waiting for the previous one to fully finish. `main_streaming.py` is
+the same idea with the waiting removed where it can be: VAD-based
+turn-taking instead of a fixed recording window, and sentence-chunked TTS
+that starts talking as soon as the first sentence is ready instead of
+waiting for the whole reply. Keeping the baseline around isn't laziness,
+it's the control group, the numbers below are only meaningful because
+there's something slower to compare against.
 
-There's also a small local web UI (`src/webapp.py`) that runs the pipeline
-against pre-recorded sample questions and shows the transcript, the reply,
-and a stage-by-stage timing breakdown, so you don't have to read timing
-numbers off a terminal to see what's slow.
+There's also a small local web UI (`src/webapp.py`) that runs the baseline
+pipeline against pre-recorded sample questions and shows the transcript, the
+reply, and a stage-by-stage timing breakdown, so you don't have to read
+timing numbers off a terminal to see what's slow.
 
 ## Stack, and why each piece
 
@@ -73,6 +77,38 @@ other, not any one model being slow on its own.
 
 *(Numbers above are on a quiet system; STT/TTS are CPU-bound so background load affects them.)*
 
+## Streaming: what it actually buys you
+
+`main_streaming.py` adds three things: Silero VAD for end-of-turn detection
+(`vad.py`, consuming frames from either a live mic or a chunked file through
+the same interface in `frame_source.py`, so the endpointing logic is testable
+without a microphone), streaming tokens from Ollama instead of waiting for
+the full reply (`llm.reply_stream`), and sentence-chunked TTS that synthesizes
+and plays each sentence as soon as it's complete instead of waiting for the
+whole answer (`tts.synthesize_sentence_stream`).
+
+STT stays a single batch call, on purpose. faster-whisper doesn't do
+token-level partial decoding the way the LLM and TTS stages here do, and for
+a voice agent that's fine: streaming STT mostly matters for live captions,
+which isn't a thing this project has. Once VAD says the turn is over there's
+one transcription call, same as the baseline. The latency win is entirely in
+not waiting for the *whole* LLM reply before saying anything.
+
+Ran both pipelines back to back in the same warmed-up process (`scripts/benchmark_streaming.py`),
+same input, so this isn't cold-start vs warm:
+
+| | baseline | streaming |
+|---|---|---|
+| time to first audio | 9.97s | 7.08s |
+| total time | 9.97s | 10.20s |
+
+Total time barely moves, which makes sense, the same amount of speech still
+has to get synthesized either way. What changes is how long you wait before
+hearing anything: about 29% less. That's the honest shape of this
+improvement, it's a latency-to-first-response win, not a total-compute win.
+Shorter sentence chunking (splitting on clauses, not just full stops) would
+likely push time-to-first-audio down further; that's on the list.
+
 ## Demo
 
 ![Demo screenshot](docs/demo-screenshot.png)
@@ -82,19 +118,16 @@ LLM, and spoken back, with the stage timing breakdown shown live.
 
 ## Roadmap
 
-The pipeline above is the foundation. The part that actually makes a voice
-agent feel real-time isn't built yet:
+Done: VAD-based turn-taking and streaming LLM-to-TTS (`main_streaming.py`,
+see above). What's left:
 
-- **Streaming STT to LLM to TTS.** Start synthesizing speech before the LLM
-  has finished generating. Start the LLM on a stable partial transcript
-  before the user's even finished talking. This is where most of the
-  10-15 seconds above goes.
-- **VAD-based turn-taking.** Right now it just records a fixed window. Real
-  turn-taking means detecting when someone's actually done speaking instead
-  of waiting out a timer.
 - **Barge-in.** Interrupting the agent mid-sentence, which needs echo
   cancellation so the mic doesn't hear the agent's own voice come back
-  through the speakers and mistake it for a new turn.
+  through the speakers and mistake it for a new turn. This is the one piece
+  that can't be validated with synthetic audio, it has to be tested by
+  actually talking over the agent and confirming it feels right.
+- Finer-grained sentence chunking (clause-level, not just full stops) to
+  push time-to-first-audio down further.
 - A smaller-model comparison, to say something concrete about what this would
   take on a more constrained device than a laptop GPU.
 
@@ -121,7 +154,23 @@ cd src
 ..\.venv\Scripts\python.exe main.py --input ..\samples\sample_question_capital_of_france.wav
 ```
 
-Or the web demo, which is the easier way to see it work:
+or the streaming version:
+
+```
+..\.venv\Scripts\python.exe main_streaming.py --input ..\samples\sample_question_capital_of_france.wav
+```
+
+Both also work with a live microphone: drop `--input` and it listens until
+Silero VAD decides you've stopped talking, instead of recording a fixed
+number of seconds.
+
+To reproduce the baseline-vs-streaming comparison from the numbers above:
+
+```
+..\.venv\Scripts\python.exe ..\scripts\benchmark_streaming.py
+```
+
+Or the web demo, which is the easier way to see the baseline pipeline work:
 
 ```
 ..\.venv\Scripts\python.exe webapp.py

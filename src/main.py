@@ -7,7 +7,7 @@ import llm
 import tts
 
 
-def run_turn(input_wav: str | None, record_seconds: float, output_wav: str | None, play_output: bool) -> None:
+def run_turn(input_wav: str | None, record_seconds: float, output_wav: str | None, play_output: bool) -> dict:
     t0 = time.time()
     if input_wav:
         print(f"[reading audio from {input_wav}]")
@@ -22,7 +22,7 @@ def run_turn(input_wav: str | None, record_seconds: float, output_wav: str | Non
     print(f"you said: {text!r}")
     if not text:
         print("[no speech detected]")
-        return
+        return {}
 
     answer = llm.reply(text)
     t3 = time.time()
@@ -43,6 +43,7 @@ def run_turn(input_wav: str | None, record_seconds: float, output_wav: str | Non
         f"tts={t4 - t3:.2f}s output={t5 - t4:.2f}s pipeline(stt+llm+tts)="
         f"{t4 - t1:.2f}s"
     )
+    return {"stt": t2 - t1, "llm": t3 - t2, "tts": t4 - t3, "first_audio": t4 - t1, "total": t4 - t1}
 
 
 if __name__ == "__main__":
