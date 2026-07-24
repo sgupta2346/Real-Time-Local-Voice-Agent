@@ -22,6 +22,9 @@ def get_vad_model():
     return _model
 
 
+MIN_UTTERANCE_SECONDS = 0.25
+
+
 def record_utterance(
     frame_source,
     min_silence_duration_ms: int = 400,
@@ -33,6 +36,12 @@ def record_utterance(
     utterance (speech followed by min_silence_duration_ms of silence).
     Returns the concatenated speech audio. Frames before speech starts are
     discarded, so callers don't pay STT cost transcribing dead air.
+
+    A genuine "start" can still fire on a brief noise blip (leftover echo
+    the AEC didn't fully cancel, a cough, a chair creak), not just real
+    speech. Anything shorter than MIN_UTTERANCE_SECONDS gets treated as no
+    speech rather than handed to Whisper, which will happily hallucinate a
+    confident, wrong transcript out of a fraction of a second of noise.
     """
     vad_iterator = VADIterator(
         get_vad_model(),
@@ -60,4 +69,7 @@ def record_utterance(
     vad_iterator.reset_states()
     if not collected:
         return np.zeros(0, dtype=np.float32)
-    return np.concatenate(collected)
+    audio = np.concatenate(collected)
+    if len(audio) < int(MIN_UTTERANCE_SECONDS * SAMPLE_RATE):
+        return np.zeros(0, dtype=np.float32)
+    return audio

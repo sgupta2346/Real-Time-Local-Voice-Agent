@@ -16,15 +16,15 @@ looks like.
 
 ## What's here right now
 
-There are two pipelines in this repo, on purpose. `main.py` is the baseline:
-record audio, transcribe, ask the LLM, synthesize speech, play it back, each
-stage waiting for the previous one to fully finish. `main_streaming.py` is
-the same idea with the waiting removed where it can be: VAD-based
-turn-taking instead of a fixed recording window, and sentence-chunked TTS
-that starts talking as soon as the first sentence is ready instead of
-waiting for the whole reply. Keeping the baseline around isn't laziness,
-it's the control group, the numbers below are only meaningful because
-there's something slower to compare against.
+There are three entry points in this repo, on purpose. `main.py` is the
+baseline: record audio, transcribe, ask the LLM, synthesize speech, play it
+back, each stage waiting for the previous one to fully finish. Keeping it
+around isn't laziness, it's the control group, the streaming numbers below
+are only meaningful because there's something slower to compare against.
+`main_streaming.py` removes the waiting where it can: VAD-based turn-taking
+instead of a fixed recording window, sentence-chunked TTS that starts
+talking as soon as the first sentence is ready. `main_bargein.py` goes
+further and lets you interrupt it mid-sentence, see Barge-in below.
 
 There's also a small local web UI (`src/webapp.py`) that runs the baseline
 pipeline against pre-recorded sample questions and shows the transcript, the
@@ -45,7 +45,7 @@ timing numbers off a terminal to see what's slow.
   get generated, so the latency cost is still there. Switched to the
   `-instruct-2507` tag, which is a genuinely non-thinking variant, and the
   overhead disappeared. Worth knowing if you're picking a Qwen3 model for
-  anything where latency matters.
+  anything latency-sensitive.
 - **Kokoro** (82M params, int8 ONNX) for TTS. Surprising amount of quality for
   a model that small, and it runs fine on CPU, which keeps the GPU free for
   the model that actually needs it.
@@ -67,8 +67,8 @@ rounded-up number:
 | **total, one turn** | **~10-15s** |
 
 That's a bad number for something meant to feel like a conversation. It's
-supposed to be, this is the naive version where nothing overlaps. One thing
-worth knowing: Ollama unloads an idle model after a few minutes by default,
+supposed to be, this is the naive version where nothing overlaps. Also,
+Ollama unloads an idle model after a few minutes by default,
 so the first request after a pause pays a full model-load cost (several
 seconds) on top of generation time. Ask it something twice in a row and the
 second answer comes back close to instantly, raw generation is usually well
@@ -87,7 +87,7 @@ the full reply (`llm.reply_stream`), and sentence-chunked TTS that synthesizes
 and plays each sentence as soon as it's complete instead of waiting for the
 whole answer (`tts.synthesize_sentence_stream`).
 
-STT stays a single batch call, on purpose. faster-whisper doesn't do
+STT stays a single batch call. faster-whisper doesn't do
 token-level partial decoding the way the LLM and TTS stages here do, and for
 a voice agent that's fine: streaming STT mostly matters for live captions,
 which isn't a thing this project has. Once VAD says the turn is over there's
@@ -109,6 +109,49 @@ improvement, it's a latency-to-first-response win, not a total-compute win.
 Shorter sentence chunking (splitting on clauses, not just full stops) would
 likely push time-to-first-audio down further; that's on the list.
 
+## Barge-in
+
+`main_bargein.py` lets you interrupt the agent mid-sentence, the way you'd
+interrupt a person. The hard part isn't detecting that you're talking, it's
+that the mic hears the agent's own voice coming back through the speakers,
+so a plain VAD on raw mic input can't tell "the agent is talking" from "the
+user is talking" at all, both look like speech.
+
+The fix is acoustic echo cancellation: an adaptive filter (`nlms_aec.py`,
+NLMS, written from scratch, not a pip package, the obvious one needs a
+compiled C extension against a Linux dev library and would break the
+one-command Windows setup) that learns the echo path from speaker to mic in
+real time and subtracts a predicted copy of the agent's own voice from the
+mic signal before VAD ever sees it.
+
+First version of this filter had a real bug: the moment synthetic near-end
+speech was injected into the test signal, the filter's weights diverged,
+the residual came out louder than the raw mic. That's "double-talk",
+naive NLMS tries to explain any unmodeled signal as prediction error and
+overcorrects, which is exactly the situation barge-in lives in by
+definition. Fixed with a Geigel-style double-talk detector: echo can only
+ever be quieter than the reference that caused it, so if the mic is louder
+than the loudest recent reference sample by some margin, that excess can't
+be echo, freeze adaptation for that sample instead of chasing it.
+
+Validated synthetically before ever touching a live mic (`tests/test_aec.py`):
+simulate an echo path with a synthetic room impulse response, inject a
+separate "user speech" clip partway through, and check what a VAD makes of
+it. Without cancellation, the agent's own echo reads as speech with 97%+
+confidence, indistinguishable from the real thing. With it, echo reads as
+2% (correctly, silence) while the real interruption still reads at 71%.
+
+Live testing (which does need an actual mic, actual speakers, and someone
+talking over it) surfaced two more real bugs synthetic testing couldn't
+have caught: the residual-audio queue was never drained between turns, so
+each new listen replayed a backlog of stale echo residue and dead air from
+the previous turn's processing time before ever reaching what was actually
+just said, and Whisper, true to form, hallucinated confident nonsense
+("thank you") out of that stale, low-quality audio instead of returning
+nothing. Fixed both: drain the queue immediately before every fresh listen,
+and drop any Whisper segment where its own `no_speech_prob` says it
+probably wasn't speech instead of trusting the text anyway.
+
 ## Demo
 
 ![Demo screenshot](docs/demo-screenshot.png)
@@ -118,14 +161,9 @@ LLM, and spoken back, with the stage timing breakdown shown live.
 
 ## Roadmap
 
-Done: VAD-based turn-taking and streaming LLM-to-TTS (`main_streaming.py`,
-see above). What's left:
+Done: VAD-based turn-taking, streaming LLM-to-TTS, and barge-in with echo
+cancellation. What's left:
 
-- **Barge-in.** Interrupting the agent mid-sentence, which needs echo
-  cancellation so the mic doesn't hear the agent's own voice come back
-  through the speakers and mistake it for a new turn. This is the one piece
-  that can't be validated with synthetic audio, it has to be tested by
-  actually talking over the agent and confirming it feels right.
 - Finer-grained sentence chunking (clause-level, not just full stops) to
   push time-to-first-audio down further.
 - A smaller-model comparison, to say something concrete about what this would
@@ -163,6 +201,15 @@ or the streaming version:
 Both also work with a live microphone: drop `--input` and it listens until
 Silero VAD decides you've stopped talking, instead of recording a fixed
 number of seconds.
+
+For barge-in, a live mic and speakers are required, there's no file-input
+mode, the whole feature only exists because of the mic/speaker interaction:
+
+```
+..\.venv\Scripts\python.exe main_bargein.py
+```
+
+Ask it something, then just start talking partway through its reply.
 
 To reproduce the baseline-vs-streaming comparison from the numbers above:
 

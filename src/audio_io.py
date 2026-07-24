@@ -17,15 +17,19 @@ def play(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> None:
     sd.wait()
 
 
+def resample(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
+    if orig_sr == target_sr:
+        return audio.astype(np.float32)
+    idx = np.arange(0, len(audio), orig_sr / target_sr).astype(np.int64)
+    idx = idx[idx < len(audio)]
+    return audio[idx].astype(np.float32)
+
+
 def load_wav(path: str, target_sample_rate: int = SAMPLE_RATE) -> np.ndarray:
     audio, sr = sf.read(path, dtype="float32", always_2d=False)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
-    if sr != target_sample_rate:
-        idx = np.arange(0, len(audio), sr / target_sample_rate).astype(np.int64)
-        idx = idx[idx < len(audio)]
-        audio = audio[idx]
-    return audio.astype(np.float32)
+    return resample(audio, sr, target_sample_rate)
 
 
 def save_wav(path: str, audio: np.ndarray, sample_rate: int) -> None:
